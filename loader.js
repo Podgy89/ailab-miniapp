@@ -11,9 +11,15 @@
     if(!force&&base&&Date.now()-readAt<60000)return base;
     if(resolving)return resolving;
     resolving=(async()=>{
-      const response=await fetch(discovery+'?t='+Date.now(),{credentials:'omit',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(12000)});
-      if(!response.ok)throw new Error('Адрес ПК пока не опубликован.');
-      const data=await response.json();if(typeof data.apiUrl!=='string')throw new Error('AiLab пока не подключён. Убедись, что программа на ПК запущена.');base=checked(data.apiUrl);readAt=Date.now();return base;
+      let data;
+      if(force){
+        try{
+          const fresh=await fetch('https://api.github.com/repos/Podgy89/ailab-miniapp/contents/endpoint.json?ref=runtime&t='+Date.now(),{credentials:'omit',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(12000)});
+          if(fresh.ok){const content=await fresh.json();data=typeof content.content==='string'?JSON.parse(atob(content.content.replace(/\s/g,''))):content;}
+        }catch{ /* При ограничении публичного API пробуем обычный каталог. */ }
+      }
+      if(!data){const response=await fetch(discovery+'?t='+Date.now(),{credentials:'omit',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(12000)});if(!response.ok)throw new Error('Адрес ПК пока не опубликован.');data=await response.json();}
+      if(typeof data.apiUrl!=='string')throw new Error('AiLab пока не подключён. Убедись, что программа на ПК запущена.');base=checked(data.apiUrl);readAt=Date.now();return base;
     })();
     try{return await resolving;}finally{resolving=null;}
   }

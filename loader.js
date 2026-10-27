@@ -1,14 +1,15 @@
 'use strict';
 (() => {
   const discovery='https://raw.githubusercontent.com/Podgy89/ailab-miniapp/runtime/endpoint.json';
-  let base='',readAt=0,resolving;
+  let base='',resolving,refreshing,interrupted=0;
   function checked(value) {
     const url=new URL(value);
     if(url.protocol!=='https:'||url.port||url.username||url.password||url.search||url.hash||url.pathname!=='/'||!url.hostname.endsWith('.lhr.life')&&!url.hostname.endsWith('.localhost.run')&&!url.hostname.endsWith('.trycloudflare.com'))throw new Error('Получен неподходящий адрес подключения.');
     return url.origin;
   }
   async function resolve(force=false) {
-    if(!force&&base&&Date.now()-readAt<60000)return base;
+    // Рабочее соединение не зависит от доступности GitHub каждую минуту.
+    if(!force&&base)return base;
     if(resolving)return resolving;
     resolving=(async()=>{
       let data;
@@ -19,22 +20,33 @@
         }catch{ /* При ограничении публичного API пробуем обычный каталог. */ }
       }
       if(!data){const response=await fetch(discovery+'?t='+Date.now(),{credentials:'omit',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(12000)});if(!response.ok)throw new Error('Адрес ПК пока не опубликован.');data=await response.json();}
-      if(typeof data.apiUrl!=='string')throw new Error('AiLab пока не подключён. Убедись, что программа на ПК запущена.');base=checked(data.apiUrl);readAt=Date.now();return base;
+      if(typeof data.apiUrl!=='string')throw new Error('AiLab пока не подключён. Убедись, что программа на ПК запущена.');const next=checked(data.apiUrl);if(!base)base=next;return next;
     })();
     try{return await resolving;}finally{resolving=null;}
   }
   function pathOnly(path){if(typeof path!=='string'||!path.startsWith('/api/')||path.includes('\\')||path.includes('..'))throw new Error('Неверный путь API.');return path;}
+  function refreshInBackground(){
+    if(refreshing)return;
+    const previous=base;
+    refreshing=(async()=>{
+      const next=await resolve(true);if(next===previous)return;
+      const check=await fetch(next+'/api/status',{credentials:'omit',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(8000)});
+      if(check.status===401&&base===previous)base=next;
+    })().catch(()=>{}).finally(()=>{refreshing=null;});
+  }
   async function api(path,init={}) {
     pathOnly(path);let previous;
-    for(let attempt=0;attempt<2;attempt++) {
+    for(let attempt=0;attempt<3;attempt++) {
       try {
-        const target=await resolve(attempt>0);
+        // Сначала повторяем тот же запрос на рабочем адресе. Смена адреса — после двух сбоев.
+        const target=await resolve(attempt===2);
         const response=await fetch(target+path,{...init,credentials:'omit',cache:'no-store',redirect:'error'});
         const expectedHtml=path==='/api/ui/index.html'&&response.status===200;
         const failed=[502,503,504,530].includes(response.status)||(!expectedHtml&&response.headers.get('content-type')?.includes('text/html'));
-        if(failed){readAt=0;if(attempt===0){previous=new Error('Переподключаемся к ПК…');continue;}throw new Error('Туннель сейчас недоступен. Повтори подключение.');}
+        if(failed){previous=new Error('Туннель сейчас недоступен. Повтори подключение.');continue;}
+        base=target;interrupted=0;
         return response;
-      }catch(error){previous=error;readAt=0;if(init.signal?.aborted)throw error;}
+      }catch(error){previous=error;if(init.signal?.aborted){if(!document.hidden&&++interrupted>=2)refreshInBackground();throw error;}}
     }
     throw previous||new Error('ПК сейчас недоступен.');
   }

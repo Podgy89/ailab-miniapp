@@ -4,7 +4,7 @@
   let base='',readAt=0,resolving;
   function checked(value) {
     const url=new URL(value);
-    if(url.protocol!=='https:'||url.port||url.username||url.password||url.search||url.hash||url.pathname!=='/'||!url.hostname.endsWith('.lhr.life')&&!url.hostname.endsWith('.localhost.run'))throw new Error('Получен неподходящий адрес подключения.');
+    if(url.protocol!=='https:'||url.port||url.username||url.password||url.search||url.hash||url.pathname!=='/'||!url.hostname.endsWith('.lhr.life')&&!url.hostname.endsWith('.localhost.run')&&!url.hostname.endsWith('.trycloudflare.com'))throw new Error('Получен неподходящий адрес подключения.');
     return url.origin;
   }
   async function resolve(force=false) {

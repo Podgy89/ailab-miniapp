@@ -1,7 +1,7 @@
 'use strict';
 (() => {
   const discovery='https://raw.githubusercontent.com/Podgy89/ailab-miniapp/runtime/endpoint.json';
-  let base='',resolving,refreshing,interrupted=0;
+  let base='',resolving,refreshing,interrupted=0,session='';
   function checked(value) {
     const url=new URL(value);
     if(url.protocol!=='https:'||url.port||url.username||url.password||url.search||url.hash||url.pathname!=='/'||!url.hostname.endsWith('.lhr.life')&&!url.hostname.endsWith('.localhost.run')&&!url.hostname.endsWith('.trycloudflare.com'))throw new Error('Получен неподходящий адрес подключения.');
@@ -40,11 +40,22 @@
       try {
         // Сначала повторяем тот же запрос на рабочем адресе. Смена адреса — после двух сбоев.
         const target=await resolve(attempt===2);
-        const response=await fetch(target+path,{...init,credentials:'omit',cache:'no-store',redirect:'error'});
+        const deadline=AbortSignal.timeout(init.body?40000:/\/(result|model-preview)$/.test(path)?90000:7000);
+        let signal=deadline;
+        if(init.signal){
+          if(typeof AbortSignal.any==='function')signal=AbortSignal.any([init.signal,deadline]);
+          else{const control=new AbortController(),abort=()=>control.abort();if(init.signal.aborted)abort();else init.signal.addEventListener('abort',abort,{once:true});deadline.addEventListener('abort',abort,{once:true});signal=control.signal;}
+        }
+        const headers={...(init.headers||{}),...(session?{'X-AiLab-Session':session}:{})};
+        const response=await fetch(target+path,{...init,headers,signal,credentials:'omit',cache:'no-store',redirect:'error'});
         const failed=[502,503,504,530].includes(response.status)||response.headers.get('content-type')?.includes('text/html');
         if(failed){previous=new Error('Туннель сейчас недоступен. Повтори подключение.');continue;}
-        base=target;interrupted=0;
-        return response;
+        // Ошибка тела после HTTP 200 тоже должна повторять запрос, а не обрывать интерфейс.
+        let result=response;
+        if(response.ok&&![204,205].includes(response.status)&&typeof response.arrayBuffer==='function'&&!/\/(result|model-preview)$/.test(path)){
+          const bytes=await response.arrayBuffer();result=new Response(bytes,{status:response.status,statusText:response.statusText,headers:response.headers});
+        }
+        base=target;interrupted=0;return result;
       }catch(error){previous=error;if(init.signal?.aborted){if(!document.hidden&&init.signal.reason?.name==='TimeoutError'&&++interrupted>=2)refreshInBackground();throw error;}}
     }
     throw previous||new Error('ПК сейчас недоступен.');
@@ -62,6 +73,7 @@
       if([401,403].includes(response.status))throw new Error('Вход не подтверждён. Закрой окно и открой его заново через бота.');
       if(!response.ok)throw new Error('Интерфейс ещё обновляется. Повтори подключение через минуту.');
       const descriptor=await response.json();
+      if(typeof descriptor.session==='string'&&/^[A-Za-z0-9_-]{86}$/.test(descriptor.session))session=descriptor.session;
       if(!/^[0-9a-f]{64}$/.test(descriptor.digest)||descriptor.file!=='ui-'+descriptor.digest+'.bin')throw new Error('Некорректный пакет интерфейса.');
       status.textContent='Загружаем интерфейс с GitHub…';
       // На GitHub уходит только запрос шифротекста: ни подпись Telegram, ни ключ туда не передаются.

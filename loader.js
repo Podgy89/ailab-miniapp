@@ -41,12 +41,11 @@
         // Сначала повторяем тот же запрос на рабочем адресе. Смена адреса — после двух сбоев.
         const target=await resolve(attempt===2);
         const response=await fetch(target+path,{...init,credentials:'omit',cache:'no-store',redirect:'error'});
-        const expectedHtml=path==='/api/ui/index.html'&&response.status===200;
-        const failed=[502,503,504,530].includes(response.status)||(!expectedHtml&&response.headers.get('content-type')?.includes('text/html'));
+        const failed=[502,503,504,530].includes(response.status)||response.headers.get('content-type')?.includes('text/html');
         if(failed){previous=new Error('Туннель сейчас недоступен. Повтори подключение.');continue;}
         base=target;interrupted=0;
         return response;
-      }catch(error){previous=error;if(init.signal?.aborted){if(!document.hidden&&++interrupted>=2)refreshInBackground();throw error;}}
+      }catch(error){previous=error;if(init.signal?.aborted){if(!document.hidden&&init.signal.reason?.name==='TimeoutError'&&++interrupted>=2)refreshInBackground();throw error;}}
     }
     throw previous||new Error('ПК сейчас недоступен.');
   }
@@ -76,14 +75,15 @@
       const key=await crypto.subtle.importKey('raw',binary(descriptor.key),'AES-GCM',false,['decrypt']);
       const plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv:binary(descriptor.iv),additionalData:new TextEncoder().encode('AiLab Mini App UI v1'),tagLength:128},key,ciphertext);
       const assets=JSON.parse(new TextDecoder().decode(plaintext));
-      const names=['index.html','app.css','app.js','model-viewer.js','media.js','chat.js'];
-      if(Object.keys(assets).length!==names.length||!names.every(name=>typeof assets[name]==='string'&&assets[name].length<200000))throw new Error('Неполный пакет интерфейса.');
+      const required=['index.html','app.css','app.js','model-viewer.js','media.js','chat.js'];
+      const names=[...required,'media-viewer.js','media-history.js'];
+      if(!required.every(name=>typeof assets[name]==='string')||!Object.keys(assets).every(name=>names.includes(name)&&typeof assets[name]==='string'&&assets[name].length<200000))throw new Error('Неполный пакет интерфейса.');
       async function asset(name){return assets[name];}      const markup=await asset('index.html'),doc=new DOMParser().parseFromString(markup,'text/html');
       const css=await asset('app.css'),cssUrl=URL.createObjectURL(new Blob([css],{type:'text/css'}));
       const style=document.createElement('link');style.rel='stylesheet';style.href=cssUrl;
       await new Promise((done,fail)=>{style.onload=done;style.onerror=fail;document.head.append(style);});URL.revokeObjectURL(cssUrl);
       document.getElementById('loader-style')?.remove();
-      const scripts=['app.js','model-viewer.js','media.js','chat.js'];
+      const scripts=['app.js','model-viewer.js','media-viewer.js','media-history.js','media.js','chat.js'].filter(name=>name in assets);
       const sources=await Promise.all(scripts.map(asset));
       document.body.replaceChildren(...doc.body.childNodes);document.title=doc.title;
       for(let i=0;i<scripts.length;i++) {

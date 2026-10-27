@@ -41,30 +41,26 @@
       if(!telegram?.initData)throw new Error('Открой приложение через кнопку AiLab в нашем Telegram-боте.');
       telegram.ready();telegram.expand();status.textContent='Подключаемся к твоему ПК…';
       const headers={'X-Telegram-Init-Data':telegram.initData};
-      let received=0;
-      async function asset(name) {
-        async function partAt(offset) {
-          const response=await api('/api/ui/'+name+'?offset='+offset,{headers,signal:AbortSignal.timeout(20000)});
-          if([401,403].includes(response.status))throw new Error('Вход не подтверждён. Закрой окно и открой его заново через бота.');
-          if(!response.ok)throw new Error('Интерфейс пока недоступен.');
-          const part=await response.json(),bytes=Uint8Array.from(atob(part.data),c=>c.charCodeAt(0));
-          if(!Number.isInteger(part.total)||part.total<1||part.total>200000||part.next!==offset+bytes.length||bytes.length<1||bytes.length>2048||part.next>part.total)throw new Error('Не удалось прочитать интерфейс. Повтори подключение.');
-          received+=bytes.length;status.textContent='Загружаем интерфейс… '+Math.ceil(received/1024)+' КБ';
-          return {bytes,total:part.total};
-        }
-        const first=await partAt(0),result=new Uint8Array(first.total),size=first.bytes.length;
-        result.set(first.bytes);let next=size;
-        async function worker() {
-          while(next<first.total) {
-            const offset=next;next+=size;const part=await partAt(offset);
-            if(part.total!==first.total||part.bytes.length!==Math.min(size,first.total-offset))throw new Error('Интерфейс изменился во время загрузки. Повтори подключение.');
-            result.set(part.bytes,offset);
-          }
-        }
-        await Promise.all(Array.from({length:4},worker));
-        return new TextDecoder().decode(result);
-      }
-      const markup=await asset('index.html'),doc=new DOMParser().parseFromString(markup,'text/html');
+      const response=await api('/api/ui/bootstrap',{headers,signal:AbortSignal.timeout(20000)});
+      if([401,403].includes(response.status))throw new Error('Вход не подтверждён. Закрой окно и открой его заново через бота.');
+      if(!response.ok)throw new Error('Интерфейс ещё обновляется. Повтори подключение через минуту.');
+      const descriptor=await response.json();
+      if(!/^[0-9a-f]{64}$/.test(descriptor.digest)||descriptor.file!=='ui-'+descriptor.digest+'.bin')throw new Error('Некорректный пакет интерфейса.');
+      status.textContent='Загружаем интерфейс с GitHub…';
+      // На GitHub уходит только запрос шифротекста: ни подпись Telegram, ни ключ туда не передаются.
+      const encrypted=await fetch('./'+descriptor.file,{credentials:'omit',cache:'force-cache',redirect:'error',signal:AbortSignal.timeout(20000)});
+      if(!encrypted.ok)throw new Error('Пакет интерфейса пока недоступен. Повтори подключение.');
+      const ciphertext=await encrypted.arrayBuffer();
+      if(ciphertext.byteLength<17||ciphertext.byteLength>500000)throw new Error('Неверный размер пакета интерфейса.');
+      const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',ciphertext)),b=>b.toString(16).padStart(2,'0')).join('');
+      if(digest!==descriptor.digest)throw new Error('Пакет интерфейса загружен не полностью. Повтори подключение.');
+      const binary=value=>Uint8Array.from(atob(value),c=>c.charCodeAt(0));
+      const key=await crypto.subtle.importKey('raw',binary(descriptor.key),'AES-GCM',false,['decrypt']);
+      const plaintext=await crypto.subtle.decrypt({name:'AES-GCM',iv:binary(descriptor.iv),additionalData:new TextEncoder().encode('AiLab Mini App UI v1'),tagLength:128},key,ciphertext);
+      const assets=JSON.parse(new TextDecoder().decode(plaintext));
+      const names=['index.html','app.css','app.js','model-viewer.js','media.js','chat.js'];
+      if(Object.keys(assets).length!==names.length||!names.every(name=>typeof assets[name]==='string'&&assets[name].length<200000))throw new Error('Неполный пакет интерфейса.');
+      async function asset(name){return assets[name];}      const markup=await asset('index.html'),doc=new DOMParser().parseFromString(markup,'text/html');
       const css=await asset('app.css'),cssUrl=URL.createObjectURL(new Blob([css],{type:'text/css'}));
       const style=document.createElement('link');style.rel='stylesheet';style.href=cssUrl;
       await new Promise((done,fail)=>{style.onload=done;style.onerror=fail;document.head.append(style);});URL.revokeObjectURL(cssUrl);

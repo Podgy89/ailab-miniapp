@@ -43,17 +43,25 @@
       const headers={'X-Telegram-Init-Data':telegram.initData};
       let received=0;
       async function asset(name) {
-        const chunks=[];let offset=0,total;
-        do {
+        async function partAt(offset) {
           const response=await api('/api/ui/'+name+'?offset='+offset,{headers,signal:AbortSignal.timeout(20000)});
           if([401,403].includes(response.status))throw new Error('Вход не подтверждён. Закрой окно и открой его заново через бота.');
           if(!response.ok)throw new Error('Интерфейс пока недоступен.');
           const part=await response.json(),bytes=Uint8Array.from(atob(part.data),c=>c.charCodeAt(0));
-          if(!Number.isInteger(part.total)||part.total<1||part.total>200000||part.next!==offset+bytes.length||bytes.length<1||bytes.length>2048||part.next>part.total||(total!==undefined&&total!==part.total))throw new Error('Не удалось прочитать интерфейс. Повтори подключение.');
-          chunks.push(bytes);offset=part.next;total=part.total;
+          if(!Number.isInteger(part.total)||part.total<1||part.total>200000||part.next!==offset+bytes.length||bytes.length<1||bytes.length>2048||part.next>part.total)throw new Error('Не удалось прочитать интерфейс. Повтори подключение.');
           received+=bytes.length;status.textContent='Загружаем интерфейс… '+Math.ceil(received/1024)+' КБ';
-        }while(offset<total);
-        const result=new Uint8Array(total);let position=0;for(const chunk of chunks){result.set(chunk,position);position+=chunk.length;}
+          return {bytes,total:part.total};
+        }
+        const first=await partAt(0),result=new Uint8Array(first.total),size=first.bytes.length;
+        result.set(first.bytes);let next=size;
+        async function worker() {
+          while(next<first.total) {
+            const offset=next;next+=size;const part=await partAt(offset);
+            if(part.total!==first.total||part.bytes.length!==Math.min(size,first.total-offset))throw new Error('Интерфейс изменился во время загрузки. Повтори подключение.');
+            result.set(part.bytes,offset);
+          }
+        }
+        await Promise.all(Array.from({length:4},worker));
         return new TextDecoder().decode(result);
       }
       const markup=await asset('index.html'),doc=new DOMParser().parseFromString(markup,'text/html');

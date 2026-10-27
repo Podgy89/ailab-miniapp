@@ -24,7 +24,8 @@
       try {
         const target=await resolve(attempt>0);
         const response=await fetch(target+path,{...init,credentials:'omit',cache:'no-store',redirect:'error'});
-        const failed=[502,503,504,530].includes(response.status)||response.headers.get('content-type')?.includes('text/html');
+        const expectedHtml=path==='/api/ui/index.html'&&response.status===200;
+        const failed=[502,503,504,530].includes(response.status)||(!expectedHtml&&response.headers.get('content-type')?.includes('text/html'));
         if(failed){readAt=0;if(attempt===0){previous=new Error('Переподключаемся к ПК…');continue;}throw new Error('Туннель сейчас недоступен. Повтори подключение.');}
         return response;
       }catch(error){previous=error;readAt=0;if(init.signal?.aborted)throw error;}

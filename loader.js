@@ -41,10 +41,20 @@
       if(!telegram?.initData)throw new Error('Открой приложение через кнопку AiLab в нашем Telegram-боте.');
       telegram.ready();telegram.expand();status.textContent='Подключаемся к твоему ПК…';
       const headers={'X-Telegram-Init-Data':telegram.initData};
+      let received=0;
       async function asset(name) {
-        const response=await api('/api/ui/'+name,{headers,signal:AbortSignal.timeout(20000)});
-        if([401,403].includes(response.status))throw new Error('Вход не подтверждён. Закрой окно и открой его заново через бота.');
-        if(!response.ok)throw new Error('Интерфейс пока недоступен.');return response.text();
+        const chunks=[];let offset=0,total;
+        do {
+          const response=await api('/api/ui/'+name+'?offset='+offset,{headers,signal:AbortSignal.timeout(20000)});
+          if([401,403].includes(response.status))throw new Error('Вход не подтверждён. Закрой окно и открой его заново через бота.');
+          if(!response.ok)throw new Error('Интерфейс пока недоступен.');
+          const part=await response.json(),bytes=Uint8Array.from(atob(part.data),c=>c.charCodeAt(0));
+          if(!Number.isInteger(part.total)||part.total<1||part.total>200000||part.next!==offset+bytes.length||bytes.length<1||bytes.length>2048||part.next>part.total||(total!==undefined&&total!==part.total))throw new Error('Не удалось прочитать интерфейс. Повтори подключение.');
+          chunks.push(bytes);offset=part.next;total=part.total;
+          received+=bytes.length;status.textContent='Загружаем интерфейс… '+Math.ceil(received/1024)+' КБ';
+        }while(offset<total);
+        const result=new Uint8Array(total);let position=0;for(const chunk of chunks){result.set(chunk,position);position+=chunk.length;}
+        return new TextDecoder().decode(result);
       }
       const markup=await asset('index.html'),doc=new DOMParser().parseFromString(markup,'text/html');
       const css=await asset('app.css'),cssUrl=URL.createObjectURL(new Blob([css],{type:'text/css'}));

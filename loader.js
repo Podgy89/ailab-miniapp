@@ -13,7 +13,7 @@
     if(resolving)return resolving;
     resolving=(async()=>{
       let data;
-      if(force){
+      if(force||!base){
         try{
           const fresh=await fetch('https://api.github.com/repos/Podgy89/ailab-miniapp/contents/endpoint.json?ref=runtime&t='+Date.now(),{credentials:'omit',cache:'no-store',redirect:'error',signal:AbortSignal.timeout(12000)});
           if(fresh.ok){const content=await fresh.json();data=typeof content.content==='string'?JSON.parse(atob(content.content.replace(/\s/g,''))):content;}

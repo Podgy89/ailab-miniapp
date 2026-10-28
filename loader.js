@@ -40,7 +40,7 @@
       try {
         // Сначала повторяем тот же запрос на рабочем адресе. Смена адреса — после двух сбоев.
         const target=await resolve(attempt===2);
-        const deadline=AbortSignal.timeout(init.body?40000:/\/(result|model-preview)$/.test(path)?90000:7000);
+        const deadline=AbortSignal.timeout(init.body?40000:init.headers?.Range?7000:/\/(result|model-preview)$/.test(path)?90000:7000);
         let signal=deadline;
         if(init.signal){
           if(typeof AbortSignal.any==='function')signal=AbortSignal.any([init.signal,deadline]);
@@ -52,7 +52,7 @@
         if(failed){previous=new Error('Туннель сейчас недоступен. Повтори подключение.');continue;}
         // Ошибка тела после HTTP 200 тоже должна повторять запрос, а не обрывать интерфейс.
         let result=response;
-        if(response.ok&&![204,205].includes(response.status)&&typeof response.arrayBuffer==='function'&&!/\/(result|model-preview)$/.test(path)){
+        if(response.ok&&![204,205].includes(response.status)&&typeof response.arrayBuffer==='function'&&(init.headers?.Range||!/\/(result|model-preview)$/.test(path))){
           const bytes=await response.arrayBuffer();result=new Response(bytes,{status:response.status,statusText:response.statusText,headers:response.headers});
         }
         base=target;interrupted=0;return result;

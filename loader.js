@@ -40,7 +40,9 @@
       try {
         // Сначала повторяем тот же запрос на рабочем адресе. Смена адреса — после двух сбоев.
         const target=await resolve(attempt===2);
-        const deadline=AbortSignal.timeout(init.body?40000:init.headers?.Range?7000:/\/(result|model-preview)$/.test(path)?90000:7000);
+        // The model catalog can take longer to arrive when job status and previews share the tunnel.
+        const responseTimeout=path==='/api/media/catalog'?20000:7000;
+        const deadline=AbortSignal.timeout(init.body?40000:init.headers?.Range?7000:/\/(result|model-preview)$/.test(path)?90000:responseTimeout);
         let signal=deadline;
         if(init.signal){
           if(typeof AbortSignal.any==='function')signal=AbortSignal.any([init.signal,deadline]);
